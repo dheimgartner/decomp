@@ -1,67 +1,11 @@
 # Script description ----
-# Contains most all of the functions used in the different scripts with the exemption of
-# the ground_truth_function found in the script observed_data_and_ground_truth. Also,
-# some minor functions are defined directly in the respective scripts to increase readability.
-# Yet other functions were sourced from the mmm_functions script which is Nepa"s software
-# property.
+# Containing all the functions of the package. The package is mainly a rapper package,
+# gathering and reorganizing functionality from other packages!
+
 
 
 # --------------------------------------------------------
 # shap_decomposition ----
-# Description:      Decomposes any model locally with help of the game theoretic shapley values.
-#                   Handles any type of model with a suitable prediction function.
-#                   The supplied prediction function takes two argmuents: the model object and
-#                   a new data frame.
-#              
-# Parameters:
-# - model         = Model object
-# - mediaypes     = Character vector of media variables
-# - data          = Data frame available to modeler
-# - target        = Character of target variable in data
-# - pfun          = Prediction function(model, newdata) and returns vector of predictions
-# 
-# Output:
-# - contributions = Data frame with dimensions nrow = nrow(data) and ncol = length(mediatypes)
-# --------------------------------------------------------
-
-shap_decomposition <- function(model, mediatypes, data, target, pfun) {
-  
-  # Initial requirements --
-  if(!require("iml")) stop("This function requires the package iml")
-  if(!is.character(mediatypes) && !is.character(target)) stop("The arguments mediatypes and target are required to be of class character")
-  if(!is.data.frame(data)) stop("The data argument has to be of class data.frame")
-  
-  
-  # Build the predictor container --
-  # A Predictor object holds any machine learning model (mlr, caret, randomForest, ...) 
-  # and the data to be used for analyzing the model. The interpretation methods in the 
-  # iml package need the machine learning model to be wrapped in a Predictor object.
-  data <- as.data.frame(data)
-  predictor <- Predictor$new(data = data, model = model, y = data[,target], predict.function = pfun)
-  
-  # Compute Shapley values --
-  shapley <- Shapley$new(predictor)
-  
-  # Explain each instance
-  shap <- list()
-  for (i in 1:nrow(data)) {
-    shapley$explain(data[i, ])
-    shap[[i]] <- shapley$results
-  }
-  
-  # Reorganize contributions --
-  contributions <-
-    map(shap, ~.x[, c("feature", "phi")] %>% 
-          pivot_wider(names_from = feature, values_from = phi)) %>% 
-    reduce(rbind)
-  contributions <- contributions[, mediatypes]
-  
-  return(contributions)
-}
-
-
-# --------------------------------------------------------
-# shap_faster ----
 # Description:      Decomposes any model locally with help of the game theoretic shapley values.
 #                   Handles any type of model with a suitable prediction function.
 #                   The supplied prediction function takes two argmuents: the model object and
@@ -80,7 +24,7 @@ shap_decomposition <- function(model, mediatypes, data, target, pfun) {
 # - contributions = Data frame with dimensions nrow = nrow(data) and ncol = length(mediatypes)
 # --------------------------------------------------------
 
-shap_faster <- function(model, mediatypes, data, target, predictors, pfun) {
+shap_decomposition <- function(model, mediatypes, data, target, predictors, pfun) {
   
   # Initial requirements --
   if(!require(shapper)) stop("This function requires the shapper package!")
