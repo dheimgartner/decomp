@@ -1,6 +1,8 @@
 # Script description ----
-# Containing all the functions of the package. The package is mainly a rapper package,
-# gathering and reorganizing functionality from other packages!
+# Containing all the functions of the package. The package's decomposition routines are 
+# mainly built by importing and reorganizing functionality from other packages. The package
+# also delivers a shapley value regression function for simply regression models and a
+# sigmoidal roi-curve fit routine
 
 
 
@@ -9,22 +11,21 @@
 # Description:      Decomposes any model locally with help of the game theoretic shapley values.
 #                   Handles any type of model with a suitable prediction function.
 #                   The supplied prediction function takes two argmuents: the model object and
-#                   a new data frame. A faster version of shap_decomposition leveraging
-#                   the python shapper library.
+#                   a new data frame. Leveraging the python shapper library.
 #              
 # Parameters:
 # - model         = Model object
-# - mediaypes     = Character vector of media variables
+# - feat_dec      = Character vector of features to be decomposed
 # - data          = Data frame available to modeler
 # - target        = Character of target variable in data
-# - predictors    = Character vector of features
+# - predictors    = Character vector of all the features
 # - pfun          = Prediction function(model, newdata) and returns vector of predictions
 # 
 # Output:
-# - contributions = Data frame with dimensions nrow = nrow(data) and ncol = length(mediatypes)
+# - contributions = Data frame with dimensions nrow = nrow(data) and ncol = length(feat_dec)
 # --------------------------------------------------------
 
-shap_decomposition <- function(model, mediatypes, data, target, predictors, pfun) {
+shap_decomposition <- function(model, feat_dec, data, target, predictors, pfun) {
   
   # Initial requirements --
   if(!require(shapper)) stop("This function requires the shapper package!")
@@ -50,14 +51,15 @@ shap_decomposition <- function(model, mediatypes, data, target, predictors, pfun
   
   # Reorganize --
   # The shap values are stored in the _attribution_ column (long format...)
-  contributions <- data[, mediatypes]
-  for (i in 1:length(mediatypes)) {
-    contributions[, mediatypes[i]] <- map(.x = shap_list,
+  contributions <- data[, feat_dec]
+  for (i in 1:length(feat_dec)) {
+    contributions[, feat_dec[i]] <- map(.x = shap_list,
                                           .f = ~.x$`_attribution_`[i]) %>% unlist()
   }
   
   return(contributions)
 }
+
 
 
 # --------------------------------------------------------
@@ -69,21 +71,21 @@ shap_decomposition <- function(model, mediatypes, data, target, predictors, pfun
 #              
 # Parameters:
 # - model         = Model object
-# - mediaypes     = Character vector of media variables
+# - feat_dec      = Character vector of features to be decomposed
 # - data          = Data frame available to modeler
 # - target        = Character of target variable in data
 # - pfun          = Prediction function(model, newdata) and returns vector of predictions
 # - grid          = grid.size in FeatureEffects function
 # 
 # Output:
-# - contributions = Data frame with dimensions nrow = nrow(data) and ncol = length(mediatypes)
+# - contributions = Data frame with dimensions nrow = nrow(data) and ncol = length(feat_dec)
 # --------------------------------------------------------
 
-ale_decomposition <- function(model, mediatypes, data, target, pfun, grid = 30) {
+ale_decomposition <- function(model, feat_dec, data, target, pfun, grid = 30) {
   
   # Initial requirements --
   if(!require("iml")) stop("This function requires the package iml")
-  if(!is.character(mediatypes) && !is.character(target)) stop("The arguments mediatypes and target are required to be of class character")
+  if(!is.character(feat_dec) && !is.character(target)) stop("The arguments feat_dec and target are required to be of class character")
   if(!is.data.frame(data)) stop("The data argument has to be of class data.frame")
   
   
@@ -99,157 +101,22 @@ ale_decomposition <- function(model, mediatypes, data, target, pfun, grid = 30) 
   
   # Compute ALE --
   # grid.size governs the trade-off between smoothness and number of datapoints within
-  # each interval (compare to thesis). If grid size is smaller than nrows(data) then this
-  # results in NA values after merging the contributions and the data data frame...
+  # each interval. If grid size is smaller than nrows(data) then this results in NA values 
+  # after merging the contributions and the data frame...
   ale <- FeatureEffects$new(predictor, method = "ale", grid.size = grid)
   
   # Extract ale estimates
-  ale <- ale$results %>% .[mediatypes]
-  ale <- map2(.x = ale, .y = mediatypes, .f = ~rename(.x, !!.y := .borders))
+  ale <- ale$results %>% .[feat_dec]
+  ale <- map2(.x = ale, .y = feat_dec, .f = ~rename(.x, !!.y := .borders))
   ale <- map(.x = ale, .f = ~left_join(data, .x)[, ".value"])
   
   # Reorganize --
   contributions <- reduce(ale, cbind)
-  colnames(contributions) <- mediatypes
+  colnames(contributions) <- feat_dec
   contributions <- as_tibble(contributions)
   
   return(contributions)
 }
-
-
-
-# --------------------------------------------------------
-# wfd_decomposition ----
-# Description:      Decomposes any model locally with help of a simple reweighting scheme. The
-#                   modeler can choose several options contingent on the model specification.
-#                   Handles any type of model with a suitable prediction function.
-#                   The supplied prediction function takes two argmuents: the model object and
-#                   a new data frame.
-#              
-# Parameters:
-# - model         = Model object
-# - mediaypes     = Character vector of media variables
-# - data          = Data frame available to modeler
-# - target        = Character of target variable in data
-# - predictors    = Character of feature variables in data
-# - pfun          = Prediction function(model, newdata) and returns vector of predictions
-# - coefs         = Logical: shut off a feature by setting coefficients (T) or variables (F), set to F
-# - mean          = Logical: replace variables by mean (T) or zero (F), set to T
-# - y_hat         = Logical: should contributions add to y_hat (T), or y (F), set to T
-# - tvem          = Logical: if model == tvem and pfun requires index set T, set to F
-# 
-# Output:
-# - contributions = Data frame with dimensions nrow = nrow(data) and ncol = length(mediatypes)
-# --------------------------------------------------------
-
-wfd_decomposition <- function(model, mediatypes, data, target, predictors, pfun, coefs = F, mean = T, y_hat = T, tvem = F) {
-  
-  # Initial requirements --
-  if(!is.character(mediatypes) && !is.character(target)) stop("The arguments mediatypes and target are required to be of class character")
-  if(!is.data.frame(data)) stop("The data argument has to be of class data.frame")
-  
-  # Initiate --
-  contributions <- mutate(data[, c(target, predictors)], "(Intercept)" = 0)
-  
-  # Replace target y with predicted y_hat
-  if (y_hat) {contributions[, target] <- pfun(model, data)}
-  
-  # Unscaled contributions --
-  # Set either coefficients or variables to 0. Or vars to mean. This decision should be made 
-  # modeling specific. Of course not all models are parametric nor does it make sense to set either
-  # coefficients or variables to zero in all cases. We recommend replacing variables with
-  # their means...
-  
-  # Set coefs to 0 --
-  if (coefs) {
-    
-    # Set each coefficient iteratively to zero and compute unscaled contributions
-    for (i in 1:length(model)) {
-      coefs_iter <- model
-      coefs_iter[names(model)[i]] <- 0
-      
-      # Predict
-      contributions[, names(coefs)[i]] <- 
-        contributions[, target] - pfun(coefs_iter, data)
-    }
-    
-    
-    # Set vars to mean --
-  } else if (mean) {
-    
-    # Remove intercept column
-    contributions <- select(contributions, -"(Intercept)")
-    
-    # Set each feature col iteretively to mean and compute unscaled contributions
-    for (i in 1:length(predictors)) {
-      feature_iter <- data[, predictors]
-      
-      # The tvem model requires an index in the data frame in order to match coefficients
-      # with observations
-      if (tvem) {feature_iter <- data[, c(predictors, "index")]}
-      feature_iter[, i] <- mean(pull(feature_iter, i), na.rm = T)
-      
-      # Predict
-      contributions[, predictors[i]] <- 
-        contributions[, target] - pfun(model, feature_iter)
-    }
-    
-    
-    # Set vars to 0 --
-  } else {
-    # Remove intercept column
-    contributions <- select(contributions, -"(Intercept)")
-    
-    # Set each feature col iteretively to zero and compute unscaled contributions
-    for (i in 1:length(predictors)) {
-      feature_iter <- data[, predictors]
-      if (tvem) {feature_iter <- data[, c(predictors, "index")]}
-      feature_iter[, i] <- 0
-      
-      # Predict
-      contributions[, predictors[i]] <- 
-        contributions[, target] - pfun(model, feature_iter)
-    }
-  }
-  
-  
-  # Rescale contributions --
-  # For reference consult the relevant thesis section...
-  # Sum of unscaled contributions
-  sum_u_cont <- contributions %>% select(-all_of(target))
-  sum_u_cont <- rowSums(sum_u_cont)
-  
-  # To reallocate
-  reall <- contributions[, target] - sum_u_cont
-  
-  # For determining the weights
-  abs_cont <- abs(contributions) %>% select(-all_of(target))
-  sum_abs_cont <- rowSums(abs_cont)
-  
-  # Rescale
-  for (i in 1:ncol(abs_cont)) {
-    contributions[, predictors[i]] <-
-      contributions[, predictors[i]] + ((abs_cont[, predictors[i]] * reall) / sum_abs_cont)
-  }
-  
-  
-  # Reorganize --
-  if (coefs) {
-    contributions <- contributions %>% select(-c(target, `(Intercept)`))
-  } else {
-    contributions <- contributions %>% select(-all_of(target))
-  }
-  
-  # Set contribution to 0 if respective media spend is 0
-  contributions <- bind_cols(contributions, data[, mediatypes]) %>%
-    mutate(media.1.spend = ifelse(media.1.spend1 == 0, 0, media.1.spend),
-           media.2.spend = ifelse(media.2.spend1 == 0, 0, media.2.spend))
-  
-  contributions <- contributions[, mediatypes]
-  
-  return(contributions)
-}
-
 
 
 
@@ -274,15 +141,16 @@ add_noise <- function(x, noise_ratio) {
 }
 
 
+
 # --------------------------------------------------------
 # fit_roi ----
-# Description:      Fits a curve with desirable properties to the scatter in the media spend -
+# Description:      Fits a curve with desirable properties to the scatter in the spend -
 #                   contribution plane and thus yields the ROI-curve. The curves are forced
 #                   to pass through the origin.
 #              
 # Parameters:
-# - data          = Data frame with scatter (x-value media spend) and contributions
-# - col_x         = Specify x (media spend) col
+# - data          = Data frame with scatter (x-value spend) and contributions
+# - col_x         = Specify x (spend) col
 # - col_y         = Specify y (contribution) col
 # - domain        = Vector specifying the domain over which the ROI-curve will be defined
 # - fit           = Character specifying the curve to be fit ("logis" or "hill")
@@ -356,8 +224,7 @@ fit_roi <- function(data, col_x, col_y, domain, fit, noise_ratio) {
     
     
     # Hill --
-    # Very similar to above but now we fit a hill curve to the data. The hill function
-    # is regularely used in the marketing context.
+    # Very similar to above but now we fit a hill curve to the data.
   } else if (fit == "hill") {
     
     # Fit curve
@@ -420,7 +287,6 @@ fit_roi <- function(data, col_x, col_y, domain, fit, noise_ratio) {
 
 
 
-
 # --------------------------------------------------------
 # min_shap ----
 # Description:      Function needed in the shapley_value reg function. In particular in the
@@ -445,8 +311,6 @@ min_shap <- function(correlation, correlationresponse, par, shapleyscore){
   
   return(f)
 }
-
-
 
 
 
