@@ -1,2 +1,3 @@
 # decomp
 (local) decomposition methods for your models
+-> to be reorganized as package...
